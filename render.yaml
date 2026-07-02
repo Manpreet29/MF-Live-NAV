@@ -1,0 +1,14 @@
+services:
+  - type: web
+    name: mf-nav-tracker-api
+    runtime: python
+    rootDir: backend
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: DATABASE_URL
+        sync: false        # you fill this in on Render dashboard
+      - key: ADMIN_SECRET
+        sync: false        # you fill this in on Render dashboard
+      - key: CORS_ORIGINS
+        sync: false        # paste your Vercel URL after deployment

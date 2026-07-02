@@ -1,0 +1,24 @@
+# Environment
+.env
+*.env
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.venv/
+venv/
+*.egg-info/
+
+# SQLite (old local db — no longer used in V2)
+*.db
+backend/data/
+
+# Node
+node_modules/
+dist/
+.DS_Store
+
+# Vite
+frontend/dist/
+frontend/.vite/

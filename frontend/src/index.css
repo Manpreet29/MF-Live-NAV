@@ -1,0 +1,37 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html { @apply font-body text-ink bg-paper antialiased; }
+  body {
+    background-image: radial-gradient(ellipse 80% 40% at 50% -5%, rgba(200,168,75,0.07) 0%, transparent 60%);
+    min-height: 100vh;
+  }
+  ::-webkit-scrollbar { width: 5px; height: 5px; }
+  ::-webkit-scrollbar-track { @apply bg-cream; }
+  ::-webkit-scrollbar-thumb { @apply bg-border rounded-full; }
+}
+
+@layer utilities {
+  .shimmer {
+    background: linear-gradient(90deg, #EDE9E1 25%, #F7F4EF 50%, #EDE9E1 75%);
+    background-size: 200% 100%;
+    animation: shimmer 1.4s infinite;
+  }
+  @keyframes shimmer { from { background-position: 200% 0; } to { background-position: -200% 0; } }
+}
+
+@layer components {
+  .card     { @apply bg-white rounded-2xl border border-border shadow-sm p-5; }
+  .field    { @apply w-full px-3.5 py-2.5 rounded-lg bg-white border border-border text-sm text-ink placeholder:text-muted focus:outline-none focus:ring-2 focus:ring-gold/40 focus:border-gold transition-colors; }
+  .label    { @apply block text-xs font-medium tracking-wide text-muted uppercase mb-1.5; }
+  .chip     { @apply inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium; }
+  .btn-primary {
+    @apply inline-flex items-center justify-center gap-2 px-5 py-2.5 rounded-xl
+           bg-ink text-paper text-sm font-medium tracking-wide
+           hover:bg-gold hover:text-ink active:scale-[0.98]
+           disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-ink disabled:hover:text-paper
+           transition-all duration-200 cursor-pointer;
+  }
+}
