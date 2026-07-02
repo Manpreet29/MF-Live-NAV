@@ -1,9 +1,5 @@
 """
-NAV calculation endpoints (PostgreSQL version)
-
-GET /api/nav/{fund_id}    Calculate live NAV for one fund
-GET /api/nav/all/batch    Calculate live NAV for all funds
-GET /api/health           Server + instrument master status
+routers/nav.py — NAV calculation endpoints (PostgreSQL version)
 """
 import logging
 from fastapi import APIRouter, Depends, HTTPException
@@ -28,7 +24,7 @@ async def get_nav(fund_id: int, db=Depends(db_dependency)):
         cur.execute("SELECT * FROM holdings WHERE fund_id=%s", (fund_id,))
         holdings = cur.fetchall()
     if not holdings:
-        raise HTTPException(400, f"Fund {fund_id} has no holdings. Upload a statement first.")
+        raise HTTPException(400, f"Fund {fund_id} has no holdings.")
 
     holdings_list = [dict(h) for h in holdings]
     symbols       = [h["trading_symbol"] for h in holdings_list if h["trading_symbol"]]
@@ -86,14 +82,41 @@ async def get_all_nav(db=Depends(db_dependency)):
 
 
 @router.get("/health")
-def health(db=Depends(db_dependency)):
-    count = instrument_master_count()
-    with db.cursor() as cur:
-        cur.execute("SELECT COUNT(*) AS c FROM funds")
-        fund_count = cur.fetchone()["c"]
+def health():
+    """
+    Health check — tests DB connection and returns status.
+    Returns 200 even if DB is down, so the error is visible in the response body.
+    """
+    from config import settings
+
+    # Check DB
+    db_status  = "ok"
+    db_error   = None
+    im_count   = 0
+    fund_count = 0
+
+    if not settings.database_url:
+        db_status = "error"
+        db_error  = "DATABASE_URL environment variable is not set."
+    else:
+        try:
+            from database import get_db
+            with get_db() as db:
+                with db.cursor() as cur:
+                    cur.execute("SELECT COUNT(*) AS c FROM instrument_master")
+                    im_count = cur.fetchone()["c"]
+                    cur.execute("SELECT COUNT(*) AS c FROM funds")
+                    fund_count = cur.fetchone()["c"]
+        except Exception as e:
+            db_status = "error"
+            db_error  = str(e)
+
     return {
-        "status":                   "ok",
-        "instrument_master_loaded": count > 0,
-        "instrument_master_count":  count,
+        "status":                   "ok" if db_status == "ok" else "degraded",
+        "database":                 db_status,
+        "database_error":           db_error,
+        "instrument_master_loaded": im_count > 0,
+        "instrument_master_count":  im_count,
         "tracked_funds":            fund_count,
+        "database_url_set":         bool(settings.database_url),
     }
