@@ -9,7 +9,7 @@ import type { FundSummary, NAVResult } from '../types'
 
 // In production, VITE_API_URL is set in Vercel environment variables.
 // In development, it's empty so baseURL defaults to '/' (Vite proxy handles it).
-const BASE_URL = (import.meta.env.VITE_API_URL as string) || ''
+const BASE_URL = 'https://mf-live-nav-api.onrender.com'
 
 const http = axios.create({
   baseURL: BASE_URL,
