@@ -1,26 +1,18 @@
 """
-Downloads the Upstox instrument master CSV (public URL, no auth needed)
-and indexes it into SQLite for ISIN -> trading_symbol lookups.
+scripts/load_instrument_master.py
+----------------------------------
+Downloads the Upstox instrument master CSV and indexes it into PostgreSQL.
 
-Run once before starting the server:
+Run once after deployment (from your local machine pointing at Supabase):
     cd backend
     python scripts/load_instrument_master.py
 
-The actual price data comes from Yahoo Finance — Upstox is only
-used here as a free source of ISIN -> NSE ticker mappings.
-
-Actual CSV columns (verified June 2026):
-    instrument_key, exchange_token, tradingsymbol, name,
-    last_price, expiry, strike, tick_size, lot_size,
-    instrument_type, option_type, exchange
-
-instrument_key format: SEGMENT|ISIN  e.g. NSE_EQ|INE090A01021
-We extract segment and ISIN by splitting on '|'.
+Re-run monthly to pick up newly listed stocks.
 """
 import re, sys, os, gzip, csv, logging
 import urllib.request
 from io import BytesIO, StringIO
-from datetime import datetime
+from datetime import datetime, timezone
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from config import settings
@@ -62,7 +54,8 @@ def load(csv_text: str) -> int:
     def get(row, name):
         return str(row.get(col.get(name.lower(), name), "")).strip()
 
-    rows, loaded_at = [], datetime.now().isoformat(timespec="seconds")
+    rows = []
+    loaded_at = datetime.now(tz=timezone.utc).isoformat()
     skipped = 0
 
     for row in reader:
@@ -79,29 +72,35 @@ def load(csv_text: str) -> int:
             continue
 
         sym = get(row, "tradingsymbol") or get(row, "trading_symbol")
-        rows.append((
-            isin, key, sym,
-            get(row, "exchange").upper(),
-            segment,
-            get(row, "name"),
-            loaded_at,
-        ))
+        rows.append((isin, key, sym, get(row, "exchange").upper(),
+                     segment, get(row, "name"), loaded_at))
 
     logger.info("Equity rows: %d  (skipped non-equity: %d)", len(rows), skipped)
 
     if not rows:
-        raise ValueError("No equity instruments found. CSV format may have changed.")
+        raise ValueError("No equity instruments found.")
 
+    # Insert in batches of 1000 to avoid timeouts
+    BATCH = 1000
     with get_db() as db:
-        db.execute("DELETE FROM instrument_master")
-        db.executemany(
-            """INSERT INTO instrument_master
-               (isin, instrument_key, trading_symbol, exchange, segment, name, loaded_at)
-               VALUES (?,?,?,?,?,?,?)""",
-            rows,
-        )
+        with db.cursor() as cur:
+            cur.execute("DELETE FROM instrument_master")
         db.commit()
-    logger.info("Inserted %d rows into instrument_master.", len(rows))
+        logger.info("Cleared old instrument master. Inserting %d rows in batches...", len(rows))
+
+        for i in range(0, len(rows), BATCH):
+            batch = rows[i:i + BATCH]
+            with db.cursor() as cur:
+                cur.executemany(
+                    """INSERT INTO instrument_master
+                       (isin, instrument_key, trading_symbol, exchange, segment, name, loaded_at)
+                       VALUES (%s,%s,%s,%s,%s,%s,%s)""",
+                    batch,
+                )
+            db.commit()
+            logger.info("  Inserted rows %d-%d...", i + 1, min(i + BATCH, len(rows)))
+
+    logger.info("Done. Inserted %d rows total.", len(rows))
     return len(rows)
 
 
@@ -114,17 +113,21 @@ def verify():
         "INE009A01021": "Infosys",
     }
     with get_db() as db:
-        total = db.execute("SELECT COUNT(*) AS c FROM instrument_master").fetchone()["c"]
-        logger.info("Total rows: %d", total)
+        with db.cursor() as cur:
+            cur.execute("SELECT COUNT(*) AS c FROM instrument_master")
+            total = cur.fetchone()["c"]
+        logger.info("Total rows in instrument_master: %d", total)
         logger.info("--- Spot check ---")
         for isin, name in checks.items():
-            row = db.execute(
-                """SELECT trading_symbol, segment FROM instrument_master
-                   WHERE isin=? AND segment IN ('NSE_EQ','NSE_SM','BSE_EQ','BSE_SM')
-                   ORDER BY CASE segment WHEN 'NSE_EQ' THEN 1 WHEN 'NSE_SM' THEN 2
-                                         WHEN 'BSE_EQ' THEN 3 ELSE 4 END LIMIT 1""",
-                (isin,),
-            ).fetchone()
+            with db.cursor() as cur:
+                cur.execute(
+                    """SELECT trading_symbol, segment FROM instrument_master
+                       WHERE isin=%s AND segment IN ('NSE_EQ','NSE_SM','BSE_EQ','BSE_SM')
+                       ORDER BY CASE segment WHEN 'NSE_EQ' THEN 1 WHEN 'NSE_SM' THEN 2
+                                             WHEN 'BSE_EQ' THEN 3 ELSE 4 END LIMIT 1""",
+                    (isin,)
+                )
+                row = cur.fetchone()
             if row:
                 logger.info("  %-14s %-22s -> %s [%s]",
                             isin, name, row["trading_symbol"], row["segment"])

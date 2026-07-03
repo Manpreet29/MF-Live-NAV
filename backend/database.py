@@ -1,13 +1,5 @@
 """
 database.py — PostgreSQL (Supabase) connection management and schema.
-
-Key differences from the old SQLite version:
-  - Placeholder: SQLite uses ?  →  PostgreSQL uses %s
-  - AUTOINCREMENT  →  SERIAL
-  - datetime('now','localtime')  →  NOW()
-  - executescript()  →  separate execute() calls in a transaction
-  - Row access: psycopg2 RealDictCursor returns dict-like rows
-    so code that does row["column"] works unchanged.
 """
 
 import logging
@@ -75,10 +67,6 @@ _TABLES = [
 # ------------------------------------------------------------------ #
 
 def get_connection() -> psycopg2.extensions.connection:
-    """
-    Open a new PostgreSQL connection.
-    RealDictCursor makes rows behave like dicts (row["column"]).
-    """
     if not settings.database_url:
         raise RuntimeError(
             "DATABASE_URL is not set. "
@@ -87,14 +75,14 @@ def get_connection() -> psycopg2.extensions.connection:
     conn = psycopg2.connect(
         settings.database_url,
         cursor_factory=psycopg2.extras.RealDictCursor,
-        connect_timeout=10,
+        connect_timeout=30,
+        options="-c statement_timeout=300000",  # 5 minutes — overrides Supabase default
     )
     return conn
 
 
 @contextmanager
 def get_db() -> Generator:
-    """Context manager that yields a connection and guarantees close."""
     conn = get_connection()
     try:
         yield conn
@@ -103,7 +91,6 @@ def get_db() -> Generator:
 
 
 def db_dependency() -> Generator:
-    """FastAPI dependency — yields connection, closes after request."""
     conn = get_connection()
     try:
         yield conn
@@ -119,10 +106,10 @@ def init_db() -> None:
     """Create tables if they don't exist. Safe to call multiple times."""
     logger.info("Initialising PostgreSQL schema...")
     with get_db() as conn:
-        with conn.cursor() as cur:
-            for stmt in _TABLES:
+        for stmt in _TABLES:
+            with conn.cursor() as cur:
                 cur.execute(stmt)
-        conn.commit()
+            conn.commit()   # commit each statement separately to avoid timeout
     logger.info("Database schema ready.")
 
 
