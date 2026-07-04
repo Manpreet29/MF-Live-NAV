@@ -1,15 +1,7 @@
 """
 Fund CRUD endpoints (PostgreSQL version)
-
-POST   /api/funds                  Create fund + upload holdings
-GET    /api/funds                  List all tracked funds
-GET    /api/funds/{id}             Get one fund with its holdings
-DELETE /api/funds/{id}             Remove fund and all its holdings
-PATCH  /api/funds/{id}             Update fund name / nav / date
-POST   /api/funds/{id}/holdings    Re-upload holdings for existing fund
 """
 import logging
-import psycopg2.extensions
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
 
 from models.fund import FundCreate, FundUpdate, FundSummary
@@ -23,9 +15,14 @@ router = APIRouter(prefix="/api/funds", tags=["Funds"])
 MAX_FILE = 10 * 1024 * 1024  # 10 MB
 
 
-# ------------------------------------------------------------------ #
-# Helpers                                                              #
-# ------------------------------------------------------------------ #
+def _row_to_dict(row) -> dict:
+    """Convert a DB row to dict, serialising datetime fields to ISO strings."""
+    d = dict(row)
+    for k, v in d.items():
+        if hasattr(v, 'isoformat'):
+            d[k] = v.isoformat()
+    return d
+
 
 def _fund_or_404(db, fund_id: int):
     with db.cursor() as cur:
@@ -62,7 +59,7 @@ def _validate_file(file: UploadFile):
     if not file.filename:
         raise HTTPException(400, "No file provided.")
     if not file.filename.lower().endswith((".xlsx", ".xls")):
-        raise HTTPException(400, f"Only .xlsx files accepted.")
+        raise HTTPException(400, "Only .xlsx files accepted.")
 
 
 # ------------------------------------------------------------------ #
@@ -103,7 +100,6 @@ async def create_fund(
 
     _save_holdings(db, fund_id, holdings, symbol_map)
     db.commit()
-
     logger.info("Created fund id=%d '%s' with %d holdings", fund_id, req.name, len(holdings))
     return {"id": fund_id, "name": req.name, "total_holdings": len(holdings)}
 
@@ -112,12 +108,12 @@ async def create_fund(
 # GET /api/funds                                                       #
 # ------------------------------------------------------------------ #
 
-@router.get("", response_model=list[FundSummary])
+@router.get("")
 def list_funds(db = Depends(db_dependency)):
     with db.cursor() as cur:
         cur.execute("SELECT * FROM funds ORDER BY created_at DESC")
         rows = cur.fetchall()
-    return [dict(r) for r in rows]
+    return [_row_to_dict(r) for r in rows]
 
 
 # ------------------------------------------------------------------ #
@@ -133,7 +129,7 @@ def get_fund(fund_id: int, db = Depends(db_dependency)):
             (fund_id,),
         )
         holdings = cur.fetchall()
-    return {**dict(fund), "holdings": [dict(h) for h in holdings]}
+    return {**_row_to_dict(fund), "holdings": [dict(h) for h in holdings]}
 
 
 # ------------------------------------------------------------------ #
@@ -153,13 +149,12 @@ def delete_fund(fund_id: int, db = Depends(db_dependency)):
 # PATCH /api/funds/{id}                                                #
 # ------------------------------------------------------------------ #
 
-@router.patch("/{fund_id}", response_model=FundSummary)
+@router.patch("/{fund_id}")
 def update_fund(fund_id: int, body: FundUpdate, db = Depends(db_dependency)):
     _fund_or_404(db, fund_id)
     updates = {k: v for k, v in body.model_dump().items() if v is not None}
     if not updates:
         raise HTTPException(400, "No fields to update.")
-
     set_clause = ", ".join(f"{k}=%s" for k in updates)
     set_clause += ", updated_at=NOW()"
     with db.cursor() as cur:
@@ -168,7 +163,7 @@ def update_fund(fund_id: int, body: FundUpdate, db = Depends(db_dependency)):
             [*updates.values(), fund_id],
         )
     db.commit()
-    return dict(_fund_or_404(db, fund_id))
+    return _row_to_dict(_fund_or_404(db, fund_id))
 
 
 # ------------------------------------------------------------------ #

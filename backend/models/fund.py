@@ -1,14 +1,13 @@
 """Pydantic models for fund CRUD operations."""
-from typing import Optional
+from typing import Optional, Any
 from pydantic import BaseModel, Field, field_validator
 from datetime import datetime
 
 
 class FundCreate(BaseModel):
-    """Body when creating a new fund tracker (sent as form fields + file)."""
-    name:         str   = Field(..., description="e.g. 'HDFC Flexi Cap Fund'")
-    official_nav: float = Field(..., gt=0, description="Previous official NAV in Rs.")
-    nav_date:     str   = Field(..., description="YYYY-MM-DD")
+    name:         str   = Field(...)
+    official_nav: float = Field(..., gt=0)
+    nav_date:     str   = Field(...)
 
     @field_validator("nav_date")
     @classmethod
@@ -29,7 +28,6 @@ class FundCreate(BaseModel):
 
 
 class FundUpdate(BaseModel):
-    """Body when updating fund metadata (PATCH)."""
     name:         Optional[str]   = None
     official_nav: Optional[float] = Field(default=None, gt=0)
     nav_date:     Optional[str]   = None
@@ -42,17 +40,18 @@ class FundUpdate(BaseModel):
         try:
             datetime.strptime(v.strip(), "%Y-%m-%d")
         except ValueError:
-            raise ValueError(f"nav_date must be YYYY-MM-DD")
+            raise ValueError("nav_date must be YYYY-MM-DD")
         return v.strip()
 
 
 class FundSummary(BaseModel):
-    """A fund row as returned in list / detail responses."""
     id:             int
     name:           str
     official_nav:   float
     nav_date:       str
     portfolio_date: str
     total_holdings: int
-    created_at:     str
-    updated_at:     str
+    created_at:     Any   # Accept datetime or string from PostgreSQL
+    updated_at:     Any   # Accept datetime or string from PostgreSQL
+
+    model_config = {"from_attributes": True}
