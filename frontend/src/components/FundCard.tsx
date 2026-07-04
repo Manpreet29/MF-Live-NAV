@@ -1,4 +1,3 @@
-// FundCard.tsx — one card per tracked fund on the dashboard
 import { useState } from 'react'
 import type { FundSummary, NAVResult } from '../types'
 import { updateFund, reuploadHoldings, deleteFund } from '../api/client'
@@ -13,13 +12,13 @@ interface Props {
 }
 
 export default function FundCard({ fund, nav, loading, onDeleted, onUpdated }: Props) {
-  const [showDrawer,  setShowDrawer]  = useState(false)
-  const [editNav,     setEditNav]     = useState(false)
-  const [navInput,    setNavInput]    = useState(String(fund.official_nav))
-  const [dateInput,   setDateInput]   = useState(fund.nav_date)
-  const [saving,      setSaving]      = useState(false)
-  const [uploading,   setUploading]   = useState(false)
-  const [confirm,     setConfirm]     = useState(false)
+  const [showDrawer, setShowDrawer] = useState(false)
+  const [editNav,    setEditNav]    = useState(false)
+  const [navInput,   setNavInput]   = useState(String(fund.official_nav))
+  const [dateInput,  setDateInput]  = useState(fund.nav_date)
+  const [saving,     setSaving]     = useState(false)
+  const [uploading,  setUploading]  = useState(false)
+  const [deleting,   setDeleting]   = useState(false)
 
   const isGain = nav ? nav.nav_change_pct >= 0 : null
 
@@ -32,10 +31,7 @@ export default function FundCard({ fund, nav, loading, onDeleted, onUpdated }: P
     if (!navInput || !dateInput) return
     setSaving(true)
     try {
-      await updateFund(fund.id, {
-        official_nav: Number(navInput),
-        nav_date:     dateInput,
-      })
+      await updateFund(fund.id, { official_nav: Number(navInput), nav_date: dateInput })
       onUpdated()
       setEditNav(false)
     } finally { setSaving(false) }
@@ -45,32 +41,40 @@ export default function FundCard({ fund, nav, loading, onDeleted, onUpdated }: P
     const file = e.target.files?.[0]
     if (!file) return
     setUploading(true)
-    try {
-      await reuploadHoldings(fund.id, file)
-      onUpdated()
-    } finally { setUploading(false) }
+    try { await reuploadHoldings(fund.id, file); onUpdated() }
+    finally { setUploading(false) }
   }
 
   const handleDelete = async () => {
-    if (!confirm) { setConfirm(true); setTimeout(() => setConfirm(false), 3000); return }
-    await deleteFund(fund.id)
-    onDeleted(fund.id)
+    const confirmed = window.confirm(
+      `Delete "${fund.name}"?\n\nThis will remove the fund and all its holdings permanently.`
+    )
+    if (!confirmed) return
+    setDeleting(true)
+    try {
+      await deleteFund(fund.id)
+      onDeleted(fund.id)
+    } catch (e) {
+      alert(`Failed to delete: ${e}`)
+    } finally {
+      setDeleting(false)
+    }
   }
 
   return (
     <>
-      <div className="card flex flex-col gap-4 animate-fade-in relative">
+      <div className="card flex flex-col gap-4 animate-fade-in">
 
         {/* Fund name + actions */}
         <div className="flex items-start justify-between gap-3">
           <div>
             <h3 className="font-display text-lg text-ink leading-tight">{fund.name}</h3>
             <p className="text-xs text-muted mt-0.5">
-              {fund.total_holdings} holdings · {fund.portfolio_date || 'No disclosure uploaded'}
+              {fund.total_holdings} holdings · {fund.portfolio_date || 'No statement uploaded'}
             </p>
           </div>
           <div className="flex items-center gap-1 flex-shrink-0">
-            {/* Re-upload holdings */}
+            {/* Re-upload */}
             <label title="Re-upload holdings statement"
               className="p-1.5 rounded-lg text-muted hover:text-ink hover:bg-cream cursor-pointer transition-colors">
               <input type="file" accept=".xlsx" className="hidden" onChange={handleReupload} />
@@ -82,9 +86,9 @@ export default function FundCard({ fund, nav, loading, onDeleted, onUpdated }: P
               <EditIcon />
             </button>
             {/* Delete */}
-            <button onClick={handleDelete} title={confirm ? 'Click again to confirm delete' : 'Delete fund'}
-              className={`p-1.5 rounded-lg transition-colors ${confirm ? 'bg-loss-bg text-loss' : 'text-muted hover:text-loss hover:bg-loss-bg'}`}>
-              <TrashIcon />
+            <button onClick={handleDelete} disabled={deleting} title="Delete this fund"
+              className="p-1.5 rounded-lg text-muted hover:text-loss hover:bg-loss-bg transition-colors disabled:opacity-50">
+              {deleting ? <SpinIcon /> : <TrashIcon />}
             </button>
           </div>
         </div>
@@ -109,7 +113,6 @@ export default function FundCard({ fund, nav, loading, onDeleted, onUpdated }: P
           </div>
         )}
 
-        {/* Divider */}
         <div className="h-px bg-gradient-to-r from-transparent via-border to-transparent" />
 
         {/* NAV display */}
@@ -120,15 +123,12 @@ export default function FundCard({ fund, nav, loading, onDeleted, onUpdated }: P
           </div>
         ) : nav ? (
           <div>
-            {/* Estimated NAV */}
             <p className="text-xs font-medium tracking-widest text-muted uppercase mb-1">
               Estimated Live NAV
             </p>
             <p className={`font-display text-4xl tracking-tight ${isGain ? 'text-gain' : 'text-loss'}`}>
               ₹{fmtNav(nav.estimated_nav)}
             </p>
-
-            {/* Change badges */}
             <div className="flex items-center gap-2 mt-2 flex-wrap">
               <span className={`chip text-xs font-medium ${isGain ? 'bg-gain-bg text-gain' : 'bg-loss-bg text-loss'}`}>
                 {isGain ? '▲' : '▼'} {Math.abs(nav.nav_change_pct).toFixed(4)}%
@@ -139,14 +139,13 @@ export default function FundCard({ fund, nav, loading, onDeleted, onUpdated }: P
               <span className="text-xs text-muted">vs ₹{fmtNav(nav.official_nav)}</span>
             </div>
 
-            {/* Stats row */}
             <div className="grid grid-cols-3 gap-2 mt-4">
               {[
-                ['Coverage',  `${fmt2(nav.price_coverage_pct)}%`],
-                ['Priced',    `${nav.priced_count}/${nav.total_holdings}`],
-                ['Updated',   new Date(nav.calculated_at).toLocaleTimeString('en-IN', {
-                                hour: '2-digit', minute: '2-digit', second: '2-digit',
-                                timeZone: 'Asia/Kolkata', hour12: true })],
+                ['Coverage', `${fmt2(nav.price_coverage_pct)}%`],
+                ['Priced',   `${nav.priced_count}/${nav.total_holdings}`],
+                ['Updated',  new Date(nav.calculated_at).toLocaleTimeString('en-IN', {
+                               hour: '2-digit', minute: '2-digit', second: '2-digit',
+                               timeZone: 'Asia/Kolkata', hour12: true })],
               ].map(([label, value]) => (
                 <div key={label} className="bg-cream rounded-lg p-2 text-center">
                   <p className="text-xs text-muted uppercase tracking-wide">{label}</p>
@@ -155,24 +154,17 @@ export default function FundCard({ fund, nav, loading, onDeleted, onUpdated }: P
               ))}
             </div>
 
-            {/* Coverage bar */}
             <div className="mt-3">
               <div className="h-1 bg-border rounded-full overflow-hidden">
-                <div
-                  className={`h-full rounded-full transition-all duration-500 ${
-                    nav.price_coverage_pct >= 90 ? 'bg-gain'
-                    : nav.price_coverage_pct >= 70 ? 'bg-gold' : 'bg-loss'
-                  }`}
-                  style={{ width: `${Math.min(nav.price_coverage_pct, 100)}%` }}
-                />
+                <div className={`h-full rounded-full transition-all duration-500 ${
+                  nav.price_coverage_pct >= 90 ? 'bg-gain'
+                  : nav.price_coverage_pct >= 70 ? 'bg-gold' : 'bg-loss'
+                }`} style={{ width: `${Math.min(nav.price_coverage_pct, 100)}%` }} />
               </div>
             </div>
 
-            {/* Holdings breakdown button */}
-            <button
-              onClick={() => setShowDrawer(true)}
-              className="mt-3 w-full text-xs text-muted hover:text-ink border border-border hover:border-ink/30 rounded-lg py-2 transition-all"
-            >
+            <button onClick={() => setShowDrawer(true)}
+              className="mt-3 w-full text-xs text-muted hover:text-ink border border-border hover:border-ink/30 rounded-lg py-2 transition-all">
               View {nav.total_holdings} holdings breakdown →
             </button>
           </div>
@@ -183,7 +175,6 @@ export default function FundCard({ fund, nav, loading, onDeleted, onUpdated }: P
         )}
       </div>
 
-      {/* Holdings drawer */}
       {showDrawer && nav && (
         <HoldingsDrawer
           fundName={fund.name}
