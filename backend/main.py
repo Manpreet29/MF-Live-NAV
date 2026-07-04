@@ -48,10 +48,12 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+# Allow ALL origins — this is a personal app with no sensitive auth
+# Hardcoded to avoid env variable parsing issues with CORS_ORIGINS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=settings.cors_origins,
-    allow_credentials=True,
+    allow_origins=["*"],
+    allow_credentials=False,   # must be False when allow_origins=["*"]
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -64,11 +66,9 @@ app.include_router(admin_router)
 @app.get("/", include_in_schema=False)
 @app.head("/", include_in_schema=False)
 def root():
-    """Root endpoint — used by UptimeRobot to keep the server awake."""
     return {"status": "ok", "service": "MF NAV Tracker V2"}
 
 
 @app.head("/api/health", include_in_schema=False)
 def health_head():
-    """HEAD version of health — required by UptimeRobot monitoring."""
     return JSONResponse(content=None, status_code=200)
